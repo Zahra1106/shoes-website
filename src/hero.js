@@ -231,13 +231,14 @@ export function initHero() {
     paintBands(a);
     ctx.globalAlpha = 1;
     ctx.drawImage(images[a], dx, dy, dw, dh);
-    // blend with the next picture so the motion looks smooth
-    if (fraction > 0.03) {
-      const b = nearest(clamp(i0 + 1, 0, N - 1));
-      if (b >= 0 && b !== a) {
-        ctx.globalAlpha = fraction;
-        ctx.drawImage(images[b], dx, dy, dw, dh);
-      }
+    // Blend with the true next picture so the motion looks smooth. Only do this when that exact
+    // picture has actually finished loading - falling back to "nearest loaded" here (as before) could
+    // pick a picture many frames away with a very different pose, producing a double-exposure/ghost
+    // look on phones where the full set of pictures hasn't downloaded yet.
+    const trueB = clamp(i0 + 1, 0, N - 1);
+    if (fraction > 0.03 && ready[trueB] && trueB !== a) {
+      ctx.globalAlpha = fraction;
+      ctx.drawImage(images[trueB], dx, dy, dw, dh);
     }
     feather(a);
     if (!canvas.classList.contains('on')) canvas.classList.add('on'); // hide the placeholder picture
@@ -274,7 +275,7 @@ export function initHero() {
       if (next >= order.length) return;
       loadFrame(order[next++]).then(() => setTimeout(worker, 0));
     };
-    for (let w = 0; w < 4; w++) worker();
+    for (let w = 0; w < 8; w++) worker();
   }
 
   /* ---------- text on top of the video ---------- */
