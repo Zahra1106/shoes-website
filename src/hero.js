@@ -40,6 +40,8 @@ export function initHero() {
     dh = SH * scale;
     dx = (cw - dw) / 2;
     dy = (ch - dh) / 2;
+    gradCache.length = 0;
+    gradCache.length = N;
     needsPaint = true;
   }
 
@@ -102,44 +104,59 @@ export function initHero() {
     return g;
   }
 
-  function paintBands(index) {
+  // Building a gradient (24 colour stops, 4 per picture) used to happen from scratch on EVERY
+  // animation frame while scrolling. That is cheap on a laptop but slow on phone GPUs/CPUs, and was
+  // the real reason scrolling felt stuck/laggy on phones. We now build each picture's 4 gradients
+  // once and reuse them. The cache is cleared on resize since gradients depend on dx/dy/dw/dh.
+  const gradCache = new Array(N);
+  function bandGradients(index) {
+    let g = gradCache[index];
+    if (g) return g;
     const w = wall[index];
-    if (!w) return;
+    if (!w) return null;
+    g = {
+      top: gradient(w.top, true, dx, dx + dw),
+      bottom: gradient(w.bottom, true, dx, dx + dw),
+      left: gradient(w.left, false, dy, dy + dh),
+      right: gradient(w.right, false, dy, dy + dh),
+    };
+    gradCache[index] = g;
+    return g;
+  }
+
+  function paintBands(index) {
+    const g = bandGradients(index);
+    if (!g) return;
     ctx.globalAlpha = 1;
     if (dy > 0.5) {
-      ctx.fillStyle = gradient(w.top, true, dx, dx + dw);
+      ctx.fillStyle = g.top;
       ctx.fillRect(0, 0, cw, dy + 1);
-      ctx.fillStyle = gradient(w.bottom, true, dx, dx + dw);
+      ctx.fillStyle = g.bottom;
       ctx.fillRect(0, dy + dh - 1, cw, ch - dy - dh + 2);
     }
     if (dx > 0.5) {
-      ctx.fillStyle = gradient(w.left, false, dy, dy + dh);
+      ctx.fillStyle = g.left;
       ctx.fillRect(0, 0, dx + 1, ch);
-      ctx.fillStyle = gradient(w.right, false, dy, dy + dh);
+      ctx.fillStyle = g.right;
       ctx.fillRect(dx + dw - 1, 0, cw - dx - dw + 1, ch);
     }
   }
 
   // softens the join between the extended wall and the picture
   function feather(index) {
-    const w = wall[index];
-    if (!w) return;
+    const g = bandGradients(index);
+    if (!g) return;
     const steps = 16;
     const length = Math.min(dw, dh) * 0.05;
     const step = length / steps;
     const alpha = (k) => Math.pow(1 - (k + 0.5) / steps, 1.5);
-    let g;
     if (dy > 0.5) {
-      g = gradient(w.top, true, dx, dx + dw);
-      for (let k = 0; k < steps; k++) { ctx.globalAlpha = alpha(k); ctx.fillStyle = g; ctx.fillRect(0, dy + k * step, cw, step + 1); }
-      g = gradient(w.bottom, true, dx, dx + dw);
-      for (let k = 0; k < steps; k++) { ctx.globalAlpha = alpha(k); ctx.fillStyle = g; ctx.fillRect(0, dy + dh - (k + 1) * step, cw, step + 1); }
+      for (let k = 0; k < steps; k++) { ctx.globalAlpha = alpha(k); ctx.fillStyle = g.top; ctx.fillRect(0, dy + k * step, cw, step + 1); }
+      for (let k = 0; k < steps; k++) { ctx.globalAlpha = alpha(k); ctx.fillStyle = g.bottom; ctx.fillRect(0, dy + dh - (k + 1) * step, cw, step + 1); }
     }
     if (dx > 0.5) {
-      g = gradient(w.left, false, dy, dy + dh);
-      for (let k = 0; k < steps; k++) { ctx.globalAlpha = alpha(k); ctx.fillStyle = g; ctx.fillRect(dx + k * step, 0, step + 1, ch); }
-      g = gradient(w.right, false, dy, dy + dh);
-      for (let k = 0; k < steps; k++) { ctx.globalAlpha = alpha(k); ctx.fillStyle = g; ctx.fillRect(dx + dw - (k + 1) * step, 0, step + 1, ch); }
+      for (let k = 0; k < steps; k++) { ctx.globalAlpha = alpha(k); ctx.fillStyle = g.left; ctx.fillRect(dx + k * step, 0, step + 1, ch); }
+      for (let k = 0; k < steps; k++) { ctx.globalAlpha = alpha(k); ctx.fillStyle = g.right; ctx.fillRect(dx + dw - (k + 1) * step, 0, step + 1, ch); }
     }
     ctx.globalAlpha = 1;
   }
