@@ -13,7 +13,7 @@ const STORAGE_KEY = 'terra-cart';
   2. Paste it below, between the quotes.
   Until a key is set, "Place order" shows a message explaining that ordering isn't connected yet.
 */
-const WEB3FORMS_ACCESS_KEY = '';
+const WEB3FORMS_ACCESS_KEY = '4f6fd912-a3b0-4f05-8f9a-63211ec635db';
 
 export function initCart() {
   const drawer = $('#drawer');
