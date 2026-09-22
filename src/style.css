@@ -14,11 +14,11 @@
   padding-bottom:env(safe-area-inset-bottom,0px);
 }
 @media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]){
+  /* :root:not([data-theme="light"]){
     --ink:#f4e8d4; --ink-2:#dcc7ab; --mute:#b79b80;
     --page:#1c110b; --page-2:#23150d; --card:#2a1a11; --line:rgba(244,232,212,.14);
     --nav-bg:rgba(28,17,11,.88); --dk:#120a06; --dk-2:#0c0603; --focus:#f0b878; color-scheme:dark;
-  }
+  } */
 }
 :root[data-theme="dark"]{
   --ink:#f4e8d4; --ink-2:#dcc7ab; --mute:#b79b80;

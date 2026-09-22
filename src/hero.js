@@ -42,6 +42,9 @@ export function initHero() {
     dy = (ch - dh) / 2;
     gradCache.length = 0;
     gradCache.length = N;
+    featherCache.length = 0;
+    featherCache.length = N;
+    lastBandIndex = -1;
     needsPaint = true;
   }
 
@@ -104,10 +107,16 @@ export function initHero() {
     return g;
   }
 
-  // Building a gradient (24 colour stops, 4 per picture) used to happen from scratch on EVERY
-  // animation frame while scrolling. That is cheap on a laptop but slow on phone GPUs/CPUs, and was
-  // the real reason scrolling felt stuck/laggy on phones. We now build each picture's 4 gradients
-  // once and reuse them. The cache is cleared on resize since gradients depend on dx/dy/dw/dh.
+  // Painting the wall bands and the soft "feather" fade at the picture's edge used to rebuild
+  // several gradients and fill roughly 70 rectangles from scratch on EVERY animation frame while
+  // scrolling. That's cheap on a laptop but slow on a phone, and was the real cause of the lag.
+  // Now:
+  //  - the 4 band gradients are built once per picture and cached (gradCache)
+  //  - the feather fade (previously 16 stacked semi-transparent rectangles per edge, up to 64 a
+  //    frame) is pre-rendered once into small offscreen strips (featherCache); every frame we just
+  //    stamp those down with one drawImage per edge instead of dozens of fillRect calls
+  //  - the wall bands themselves sit outside the picture, so once painted for a given picture they
+  //    don't need to be redrawn again until the picture index changes (lastBandIndex)
   const gradCache = new Array(N);
   function bandGradients(index) {
     let g = gradCache[index];
@@ -124,9 +133,12 @@ export function initHero() {
     return g;
   }
 
+  let lastBandIndex = -1;
   function paintBands(index) {
+    if (index === lastBandIndex) return; // nothing outside the picture has changed
     const g = bandGradients(index);
     if (!g) return;
+    lastBandIndex = index;
     ctx.globalAlpha = 1;
     if (dy > 0.5) {
       ctx.fillStyle = g.top;
@@ -142,23 +154,62 @@ export function initHero() {
     }
   }
 
-  // softens the join between the extended wall and the picture
-  function feather(index) {
-    const g = bandGradients(index);
-    if (!g) return;
-    const steps = 16;
+  const FEATHER_STEPS = 16;
+  const featherAlpha = (k) => Math.pow(1 - (k + 0.5) / FEATHER_STEPS, 1.5);
+
+  // Pre-renders one edge's fade into a small offscreen canvas, once, instead of stacking rectangles
+  // on the main canvas every frame. `horizontalColor` picks the colour gradient's direction (matches
+  // the wall gradient at that edge); `flip` mirrors which side of the strip is strongest, so the fade
+  // is always strongest right at the seam with the picture.
+  function buildStrip(colors, w, h, horizontalColor, flip) {
+    const strip = document.createElement('canvas');
+    strip.width = Math.max(1, Math.round(w));
+    strip.height = Math.max(1, Math.round(h));
+    const sc = strip.getContext('2d');
+    const colourGrad = horizontalColor
+      ? sc.createLinearGradient(0, 0, strip.width, 0)
+      : sc.createLinearGradient(0, 0, 0, strip.height);
+    colors.forEach((c, k) => colourGrad.addColorStop(k / (SAMPLES - 1), `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`));
+    sc.fillStyle = colourGrad;
+    const fadeLength = horizontalColor ? strip.height : strip.width;
+    const step = fadeLength / FEATHER_STEPS;
+    for (let k = 0; k < FEATHER_STEPS; k++) {
+      sc.globalAlpha = featherAlpha(k);
+      const pos = flip ? fadeLength - (k + 1) * step : k * step;
+      if (horizontalColor) sc.fillRect(0, pos, strip.width, step + 1);
+      else sc.fillRect(pos, 0, step + 1, strip.height);
+    }
+    return strip;
+  }
+
+  const featherCache = new Array(N);
+  function featherStrips(index) {
+    let f = featherCache[index];
+    if (f) return f;
+    const w = wall[index];
+    if (!w) return null;
     const length = Math.min(dw, dh) * 0.05;
-    const step = length / steps;
-    const alpha = (k) => Math.pow(1 - (k + 0.5) / steps, 1.5);
-    if (dy > 0.5) {
-      for (let k = 0; k < steps; k++) { ctx.globalAlpha = alpha(k); ctx.fillStyle = g.top; ctx.fillRect(0, dy + k * step, cw, step + 1); }
-      for (let k = 0; k < steps; k++) { ctx.globalAlpha = alpha(k); ctx.fillStyle = g.bottom; ctx.fillRect(0, dy + dh - (k + 1) * step, cw, step + 1); }
-    }
-    if (dx > 0.5) {
-      for (let k = 0; k < steps; k++) { ctx.globalAlpha = alpha(k); ctx.fillStyle = g.left; ctx.fillRect(dx + k * step, 0, step + 1, ch); }
-      for (let k = 0; k < steps; k++) { ctx.globalAlpha = alpha(k); ctx.fillStyle = g.right; ctx.fillRect(dx + dw - (k + 1) * step, 0, step + 1, ch); }
-    }
+    f = {
+      length,
+      top: dy > 0.5 ? buildStrip(w.top, dw, length, true, false) : null,
+      bottom: dy > 0.5 ? buildStrip(w.bottom, dw, length, true, true) : null,
+      left: dx > 0.5 ? buildStrip(w.left, length, dh, false, false) : null,
+      right: dx > 0.5 ? buildStrip(w.right, length, dh, false, true) : null,
+    };
+    featherCache[index] = f;
+    return f;
+  }
+
+  // softens the join between the extended wall and the picture (runs every frame: it draws on top
+  // of the picture itself, which is redrawn every frame, so unlike the bands it can't be skipped)
+  function feather(index) {
+    const f = featherStrips(index);
+    if (!f) return;
     ctx.globalAlpha = 1;
+    if (f.top) ctx.drawImage(f.top, dx, dy);
+    if (f.bottom) ctx.drawImage(f.bottom, dx, dy + dh - f.length);
+    if (f.left) ctx.drawImage(f.left, dx, dy);
+    if (f.right) ctx.drawImage(f.right, dx + dw - f.length, dy);
   }
 
   /* ---------- drawing ---------- */
